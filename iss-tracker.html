@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ISS Tracker – Live Position</title>
+
+  <!-- Elegant typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ==========================================================
+       ISS Tracker – Styles
+       ========================================================== */
+
+    :root {
+      --glass: rgba(8, 12, 26, 0.72);
+      --border: rgba(125, 211, 252, 0.22);
+      --text: #e2e8f0;
+      --muted: #7dd3fc;
+      --dim: #64748b;
+      --accent: #38bdf8;
+      --ok: #34d399;
+      --bad: #f87171;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+      background: #050814;
+      color: var(--text);
+      font-family: "Poppins", system-ui, -apple-system, sans-serif;
+    }
+
+    /* ---------- Full-screen map ---------- */
+    #map {
+      position: fixed;
+      inset: 0;
+      background: #050814;
+    }
+
+    #map-fallback-frame {
+      position: absolute;
+      inset: 0;
+      z-index: 402;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    .map-error {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      z-index: 1000;
+      width: min(90%, 420px);
+      padding: 16px 20px;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    /* Soft vignette to give the map a "mission control" feel */
+    #map::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 401;
+      pointer-events: none;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(5, 8, 20, 0.7) 100%);
+    }
+
+    /* Keep map attribution above the bottom bar */
+    .leaflet-control-container .leaflet-bottom {
+      bottom: 82px;
+    }
+
+    /* ---------- Shared glass style ---------- */
+    .glass {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    }
+
+    /* ---------- Top-left HUD ---------- */
+    .hud {
+      position: fixed;
+      top: 18px;
+      left: 18px;
+      z-index: 1000;
+      width: 280px;
+      padding: 18px;
+    }
+
+    .hud-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .hud-title .icon {
+      font-size: 1.8rem;
+    }
+
+    .hud-title h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+
+    .hud-title small {
+      display: block;
+      font-size: 0.7rem;
+      font-weight: 400;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .live {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 14px 0 12px;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--ok);
+      animation: ping 1.6s infinite;
+    }
+
+    .dot.lost {
+      background: var(--bad);
+      animation: none;
+    }
+
+    @keyframes ping {
+      0%   { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6); }
+      70%  { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+    }
+
+    .facts {
+      display: grid;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: var(--dim);
+      line-height: 1.5;
+    }
+
+    .facts strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* ---------- Top-right controls ---------- */
+    .controls {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 1000;
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 9px 15px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--glass);
+      color: var(--text);
+      font: inherit;
+      font-size: 0.82rem;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      transition: background 0.2s, color 0.2s;
+    }
+
+    .btn:hover {
+      border-color: var(--accent);
+    }
+
+    .btn.on {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #031627;
+      font-weight: 600;
+    }
+
+    /* ---------- Bottom bar: latitude & longitude ---------- */
+    .bottom-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 1000;
+      display: grid;
+      grid-template-columns: 1.3fr 1.3fr 1fr 1fr 1fr 1fr;
+      background: rgba(5, 8, 20, 0.88);
+      border-top: 1px solid var(--border);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+
+    .cell {
+      padding: 14px 12px;
+      text-align: center;
+      border-right: 1px solid rgba(125, 211, 252, 0.08);
+    }
+
+    .cell:last-child {
+      border-right: none;
+    }
+
+    .cell span {
+      display: block;
+      font-size: 0.62rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    .cell strong {
+      display: block;
+      margin-top: 4px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    /* Latitude and longitude are the highlighted values */
+    .cell.main strong {
+      color: #7dd3fc;
+      font-size: 1.15rem;
+    }
+
+    /* ---------- ISS marker ---------- */
+    .iss-marker {
+      background: none;
+      border: none;
+    }
+
+    .iss-wrap {
+      position: relative;
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+    }
+
+    .iss-core {
+      position: relative;
+      font-size: 24px;
+      filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.95));
+      animation: bob 3s ease-in-out infinite;
+    }
+
+    .iss-ring {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      border: 2px solid rgba(56, 189, 248, 0.85);
+      animation: ring 2s ease-out infinite;
+    }
+
+    @keyframes ring {
+      from { transform: scale(0.4); opacity: 1; }
+      to   { transform: scale(1.7); opacity: 0; }
+    }
+
+    @keyframes bob {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-4px); }
+    }
+
+    /* ---------- Small screens ---------- */
+    @media (max-width: 720px) {
+      .hud {
+        width: calc(100vw - 36px);
+      }
+
+      .facts {
+        display: none;
+      }
+
+      .bottom-bar {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .cell:nth-child(n + 4) {
+        display: none;
+      }
+
+      .leaflet-control-container .leaflet-bottom {
+        bottom: 78px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Top-left: title, live status and mission facts -->
+  <aside class="hud glass">
+    <div class="hud-title">
+      <span class="icon">🛰️</span>
+      <div>
+        <h1>International Space Station</h1>
+        <small>NORAD ID 25544</small>
+      </div>
+    </div>
+
+    <div class="live">
+      <span class="dot" id="live-dot"></span>
+      <span id="live-text">Connecting…</span>
+    </div>
+
+    <div class="facts">
+      <div>Orbits Earth about every <strong>92 minutes</strong></div>
+      <div>Travels around <strong>7.66 km</strong> every second</div>
+      <div>Crew: humans living in orbit since <strong>2000</strong></div>
+    </div>
+  </aside>
+
+  <!-- Top-right: controls -->
+  <div class="controls">
+    <button class="btn on" id="follow-btn" type="button">◉ Following</button>
+    <button class="btn" id="world-btn" type="button">🌍 World view</button>
+  </div>
+
+  <!-- Bottom bar: latitude & longitude -->
+  <footer class="bottom-bar">
+    <div class="cell main">
+      <span>Latitude</span>
+      <strong id="lat">—</strong>
+    </div>
+    <div class="cell main">
+      <span>Longitude</span>
+      <strong id="lon">—</strong>
+    </div>
+    <div class="cell">
+      <span>Altitude</span>
+      <strong id="alt">—</strong>
+    </div>
+    <div class="cell">
+      <span>Speed</span>
+      <strong id="speed">—</strong>
+    </div>
+    <div class="cell">
+      <span>Sunlight</span>
+      <strong id="vis">—</strong>
+    </div>
+    <div class="cell">
+      <span>Updated</span>
+      <strong id="updated">—</strong>
+    </div>
+  </footer>
+
+  <script>
+    const LEAFLET_CDNS = [
+      "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/dist/leaflet",
+      "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet",
+      "https://unpkg.com/leaflet@1.9.4/dist/leaflet",
+    ];
+
+    function loadLeafletAsset(extension, sourceIndex = 0) {
+      return new Promise((resolve, reject) => {
+        if (sourceIndex >= LEAFLET_CDNS.length) {
+          reject(new Error(`Leaflet ${extension} could not be loaded from any CDN.`));
+          return;
+        }
+
+        const url = `${LEAFLET_CDNS[sourceIndex]}.${extension}`;
+        const element = extension === "js"
+          ? document.createElement("script")
+          : document.createElement("link");
+
+        if (element instanceof HTMLScriptElement) {
+          element.src = url;
+        } else {
+          element.rel = "stylesheet";
+          element.href = url;
+        }
+
+        element.onload = () => {
+          if (extension !== "js" || window.L) {
+            resolve();
+            return;
+          }
+          element.remove();
+          loadLeafletAsset(extension, sourceIndex + 1).then(resolve, reject);
+        };
+        element.onerror = () => {
+          element.remove();
+          loadLeafletAsset(extension, sourceIndex + 1).then(resolve, reject);
+        };
+        document.head.appendChild(element);
+      });
+    }
+
+    Promise.all([loadLeafletAsset("css"), loadLeafletAsset("js")])
+      .then(startTracker)
+      .catch((error) => {
+      console.error(error);
+      const message = document.createElement("div");
+      message.className = "map-error glass";
+      message.setAttribute("role", "alert");
+      message.textContent = "Map assets could not be loaded. Check your internet connection or network restrictions, then reload.";
+      document.getElementById("map").appendChild(message);
+      document.getElementById("live-text").textContent = "Map unavailable";
+      document.getElementById("live-dot").classList.add("lost");
+      });
+
+    function startTracker() {
+    /* ==========================================================
+       ISS Tracker – live position with Leaflet and wheretheiss.at
+       Endpoint: https://api.wheretheiss.at/v1/satellites/25544
+         25544 = NORAD ID of the ISS
+         units=kilometers → altitude in km, velocity in km/h
+
+       Response (trimmed):
+       { name, latitude, longitude, altitude, velocity,
+         visibility: "daylight" | "eclipsed", timestamp }
+
+       The app polls every 5 seconds with fetch() and redraws
+       the marker and the orbit trail on each update.
+       ========================================================== */
+
+    const ISS_API = "https://api.wheretheiss.at/v1/satellites/25544?units=kilometers";
+    const POLL_MS = 5000;       // request a new position every 5 seconds
+    const MAX_TRAIL = 120;      // number of recent points kept for the trail
+
+    const $ = (id) => document.getElementById(id);
+
+    const dom = {
+      liveDot: $("live-dot"),
+      liveText: $("live-text"),
+      lat: $("lat"),
+      lon: $("lon"),
+      alt: $("alt"),
+      speed: $("speed"),
+      vis: $("vis"),
+      updated: $("updated"),
+      followBtn: $("follow-btn"),
+      worldBtn: $("world-btn"),
+    };
+
+    const state = {
+      trail: [],          // recent { lat, lon } points
+      current: null,      // [lat, lon] of the latest position
+      follow: true,       // keep the map centred on the ISS
+      hasCentered: false, // first position has been shown
+      lastUpdate: null,   // timestamp (ms) of the last successful update
+    };
+
+    /* ==========================================================
+       1. Map setup (Leaflet)
+       ========================================================== */
+
+    const map = L.map("map", {
+      zoomControl: false,   // the controls sit in the top-right corner instead
+      worldCopyJump: true,  // lets the marker jump across the date line smoothly
+      minZoom: 2,
+      maxZoom: 6,
+    }).setView([0, 0], 2);
+
+    // Free Wikimedia basemap tiles built from OpenStreetMap data; no API key required
+    const tileLayer = L.tileLayer("https://maps.wikimedia.org/osm-intl/{z}/{x}/{y}.png", {
+      maxZoom: 6,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
+        '&middot; <a href="https://wikimediafoundation.org/">Wikimedia</a>',
+    }).addTo(map);
+    let embeddedMapFallback = false;
+    let embeddedMapFrame = null;
+    let lastEmbeddedMapUpdate = null;
+    tileLayer.on("tileerror", showEmbeddedMapFallback);
+
+    // Layer that holds the orbit trail segments
+    const trailLayer = L.layerGroup().addTo(map);
+
+    // Custom ISS marker with a pulsing ring
+    const issIcon = L.divIcon({
+      className: "iss-marker",
+      html: `<div class="iss-wrap"><div class="iss-ring"></div><div class="iss-core">🛰️</div></div>`,
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
+    });
+
+    const marker = L.marker([0, 0], { icon: issIcon }).addTo(map);
+    marker.setOpacity(0); // hidden until the first position arrives
+
+    // Dragging the map stops automatic following
+    map.on("dragstart", () => setFollow(false));
+
+    /* ==========================================================
+       2. Fetching the position
+       ========================================================== */
+
+    async function fetchISS() {
+      const response = await fetch(ISS_API);
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      return response.json();
+    }
+
+    // Polling loop: waits for each request to finish before scheduling the next one
+    async function poll() {
+      try {
+        const data = await fetchISS();
+        update(data);
+        setLive(true);
+      } catch (error) {
+        console.error(error);
+        setLive(false);
+      } finally {
+        setTimeout(poll, POLL_MS);
+      }
+    }
+
+    /* ==========================================================
+       3. Updating the display
+       ========================================================== */
+
+    function update(data) {
+      const { latitude: lat, longitude: lon, altitude, velocity, visibility } = data;
+
+      state.current = [lat, lon];
+      state.lastUpdate = Date.now();
+
+      if (embeddedMapFallback) {
+        refreshEmbeddedMap(lat, lon);
+      } else {
+        addTrailPoint(lat, lon);
+        marker.setLatLng([lat, lon]).setOpacity(1);
+
+        if (!state.hasCentered) {
+          map.setView([lat, lon], 3);
+          state.hasCentered = true;
+        } else if (state.follow) {
+          map.panTo([lat, lon], { animate: true });
+        }
+      }
+
+      // Bottom bar values
+      dom.lat.textContent = formatCoord(lat, "N", "S");
+      dom.lon.textContent = formatCoord(lon, "E", "W");
+      dom.alt.textContent = `${Math.round(altitude)} km`;
+      dom.speed.textContent = `${Math.round(velocity).toLocaleString()} km/h`;
+      dom.vis.textContent = visibility === "daylight" ? "☀️ Sunlit" : "🌘 Shadow";
+    }
+
+    function setLive(isLive) {
+      dom.liveDot.classList.toggle("lost", !isLive);
+      dom.liveText.textContent = isLive ? "Live" : "Signal lost, retrying…";
+    }
+
+    // Refresh the "Updated Xs ago" text every second
+    setInterval(() => {
+      if (!state.lastUpdate) return;
+
+      const seconds = Math.floor((Date.now() - state.lastUpdate) / 1000);
+      dom.updated.textContent = seconds < 2 ? "Just now" : `${seconds}s ago`;
+    }, 1000);
+
+    /* ==========================================================
+       4. Orbit trail
+       ========================================================== */
+
+    function addTrailPoint(lat, lon) {
+      state.trail.push({ lat, lon });
+
+      if (state.trail.length > MAX_TRAIL) {
+        state.trail.shift();
+      }
+
+      drawTrail();
+    }
+
+    // Redraws the trail as short segments that fade from old (faint) to new (bright)
+    function drawTrail() {
+      trailLayer.clearLayers();
+      const points = state.trail;
+
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1];
+        const b = points[i];
+
+        // Skip segments that cross the date line, so no line is drawn across the whole map
+        if (Math.abs(b.lon - a.lon) > 180) continue;
+
+        L.polyline([[a.lat, a.lon], [b.lat, b.lon]], {
+          color: "#38bdf8",
+          weight: 3,
+          opacity: (i / points.length) * 0.9,
+          lineCap: "round",
+          interactive: false,
+        }).addTo(trailLayer);
+      }
+    }
+
+    /* ==========================================================
+       5. Controls
+       ========================================================== */
+
+    function setFollow(on) {
+      state.follow = on;
+      dom.followBtn.classList.toggle("on", on);
+      dom.followBtn.textContent = on ? "◉ Following" : "◎ Follow ISS";
+
+      if (on && state.current) {
+        if (embeddedMapFallback) {
+          refreshEmbeddedMap(state.current[0], state.current[1], true);
+        } else {
+          map.panTo(state.current, { animate: true });
+        }
+      }
+    }
+
+    dom.followBtn.addEventListener("click", () => setFollow(!state.follow));
+
+    dom.worldBtn.addEventListener("click", () => {
+      setFollow(false);
+      if (embeddedMapFallback) {
+        embeddedMapFrame.src = "https://www.openstreetmap.org/export/embed.html?bbox=-180%2C-85%2C180%2C85&layer=mapnik";
+        lastEmbeddedMapUpdate = Date.now();
+      } else {
+        map.setView([20, 0], 2, { animate: true });
+      }
+    });
+
+    function showEmbeddedMapFallback() {
+      if (embeddedMapFallback) return;
+
+      embeddedMapFallback = true;
+      map.remove();
+      embeddedMapFrame = document.createElement("iframe");
+      embeddedMapFrame.id = "map-fallback-frame";
+      embeddedMapFrame.title = "OpenStreetMap live ISS position";
+      embeddedMapFrame.loading = "eager";
+      document.getElementById("map").appendChild(embeddedMapFrame);
+      if (state.current) {
+        lastEmbeddedMapUpdate = null;
+        refreshEmbeddedMap(state.current[0], state.current[1]);
+      } else {
+        embeddedMapFrame.src = "https://www.openstreetmap.org/export/embed.html?bbox=-180%2C-85%2C180%2C85&layer=mapnik";
+        lastEmbeddedMapUpdate = Date.now() - 30000;
+      }
+    }
+
+    function refreshEmbeddedMap(lat, lon, force = false) {
+      if (!embeddedMapFallback || (!force && Date.now() - (lastEmbeddedMapUpdate ?? 0) < 30000)) return;
+
+      const latPadding = 22;
+      const lonPadding = 45;
+      const bbox = [
+        Math.max(-180, lon - lonPadding),
+        Math.max(-85, lat - latPadding),
+        Math.min(180, lon + lonPadding),
+        Math.min(85, lat + latPadding),
+      ].join(",");
+      const params = new URLSearchParams({
+        bbox,
+        layer: "mapnik",
+        marker: `${lat},${lon}`,
+      });
+
+      embeddedMapFrame.src = `https://www.openstreetmap.org/export/embed.html?${params}`;
+      lastEmbeddedMapUpdate = Date.now();
+    }
+
+    /* ==========================================================
+       6. Helpers
+       ========================================================== */
+
+    // 51.5072, "N", "S" → "51.5072° N"
+    function formatCoord(value, positive, negative) {
+      return `${Math.abs(value).toFixed(4)}° ${value >= 0 ? positive : negative}`;
+    }
+
+    /* ==========================================================
+       7. Start tracking
+       ========================================================== */
+
+    poll();
+    }
+  </script>
+</body>
+</html>
